@@ -1,0 +1,25 @@
+{
+  "name": "time-segment",
+  "version": "0.1.0",
+  "description": "Segment-based time utilities for Daily Time Records",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
+  },
+  "keywords": [
+    "time",
+    "segments",
+    "attendance",
+    "dtr",
+    "schedule"
+  ],
+  "author": "kosinix",
+  "license": "MIT",
+  "devDependencies": {
+    "jest": "^30.2.0"
+  }
+}
