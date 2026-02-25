@@ -85,7 +85,7 @@ export function computeGraceMinutes(grace, log) {
  * Snaps a log's start time to the grace start
  * if the log start falls within the grace window.
  *
- * Mutates the log segment.
+ * Does not mutate the log segment.
  *
  * @param {Segment} log
  * @param {Segment} grace
@@ -93,19 +93,20 @@ export function computeGraceMinutes(grace, log) {
  */
 export function snapLogToStart(log, grace) {
     const logStart = log[0];
+    let adjusted = log[0];
 
     if (logStart >= grace[0] && logStart <= grace[1]) {
-        log[0] = grace[0];
+        adjusted = grace[0];
     }
 
-    return log;
+    return [adjusted, log[1]];
 }
 
 /**
  * Snaps a log's end time to the grace end
  * if the log end falls within the grace window.
  *
- * Mutates the log segment.
+ * Does not mutate the log segment.
  *
  * @param {Segment} log
  * @param {Segment} grace
@@ -113,12 +114,13 @@ export function snapLogToStart(log, grace) {
  */
 export function snapLogToEnd(log, grace) {
     const logSnapPoint = log[1];
+    let adjusted = log[1];
 
     if (logSnapPoint >= grace[0] && logSnapPoint <= grace[1]) {
-        log[1] = grace[1];
+        adjusted = grace[1];
     }
 
-    return log;
+    return [log[0], adjusted];
 }
 
 /**
@@ -140,21 +142,20 @@ export function minitsToHoursMins(minits) {
  * Each log is checked against each grace window and
  * snapped to the grace start when applicable.
  *
- * Mutates the logs array.
+ * Does not mutate the logs array.
  *
  * @param {Segment[]} logs
  * @param {Segment[]} graces
  * @returns {Segment[]}
  */
 export function applyGraces(logs, graces) {
-    for (let l = 0; l < logs.length; l++) {
-        const log = logs[l];
+    return logs.map(log => {
         for (let g = 0; g < graces.length; g++) {
             const grace = graces[g];
-            logs[l] = snapLogToStart(log, grace);
+            log = snapLogToStart(log, grace);
         }
-    }
-    return logs;
+        return log
+    })
 }
 
 /**
@@ -204,6 +205,125 @@ export function formatMinits(minitsArray) {
     });
 }
 
+/**
+ * Subtracts a single segment from another segment using
+ * half-open interval semantics [start, end).
+ *
+ * This is an internal helper and does not attempt to merge
+ * or normalize results.
+ *
+ * Behavior:
+ * - If there is no overlap, returns an empty array
+ * - If partially overlapped, returns 1 or 2 remainder segments
+ * - If fully covered, returns an empty array
+ *
+ * Examples:
+ * _subtractSegment([480, 720], [540, 555])
+ * → [[480, 540], [555, 720]]
+ *
+ * _subtractSegment([480, 720], [300, 480])
+ * → []
+ *
+ * @param {[number, number]} source - Original segment [start, end)
+ * @param {[number, number]} remove - Segment to subtract [start, end)
+ * @returns {Array<[number, number]>} Remaining segment(s) after subtraction
+ */
+function _subtractSegment(source, remove) {
+    const [sStart, sEnd] = source;
+    const [rStart, rEnd] = remove;
+
+    // No overlap → return original segment
+    if (rEnd <= sStart || rStart >= sEnd) {
+        return [];
+    }
+
+    const result = [];
+
+    // Left remainder
+    if (rStart > sStart) {
+        result.push([sStart, Math.min(rStart, sEnd)]);
+    }
+
+    // Right remainder
+    if (rEnd < sEnd) {
+        result.push([Math.max(rEnd, sStart), sEnd]);
+    }
+
+    return result;
+}
+
+/**
+ * Subtracts multiple break segments from multiple log segments.
+ *
+ * Each log is processed independently against each break.
+ * The function:
+ * - Does NOT merge or normalize output segments
+ * - Does NOT mutate input arrays
+ * - Returns raw remainder segments
+ *
+ * Typical usage is to follow this with a merge/normalize step.
+ *
+ * Example:
+ * subtractSegments(
+ *   [[480, 720]],
+ *   [[540, 555]]
+ * )
+ * → [[480, 540], [555, 720]]
+ *
+ * @param {Array<[number, number]>} logs - Source segments to subtract from
+ * @param {Array<[number, number]>} breaks - Segments to subtract
+ * @returns {Array<[number, number]>} Resulting unmerged segments
+ */
+export function subtractSegments(logs, breaks) {
+    const result = [];
+    logs.forEach(log => {
+        breaks.forEach(br => {
+            result.push(..._subtractSegment(log, br));
+        });
+    });
+    return result;
+}
+
+/**
+ * Merges overlapping or adjacent segments using half-open interval semantics.
+ *
+ * Example:
+ * mergeSegments([[480, 540], [540, 600], [610, 720]])
+ * -> [[480, 600], [610, 720]]
+ *
+ * @param {Segment[]} segments
+ * @returns {Segment[]} Merged segments
+ */
+export function mergeSegments(segments) {
+    if (!Array.isArray(segments) || segments.length === 0) {
+        return [];
+    }
+
+    // Defensive copy + sort by start time
+    const sorted = segments
+        .map(seg => [seg[0], seg[1]])
+        .sort((a, b) => a[0] - b[0]);
+
+    const merged = [];
+    let [currStart, currEnd] = sorted[0];
+
+    for (let i = 1; i < sorted.length; i++) {
+        const [nextStart, nextEnd] = sorted[i];
+
+        // Overlapping or adjacent
+        if (nextStart <= currEnd) {
+            currEnd = Math.max(currEnd, nextEnd);
+        } else {
+            merged.push([currStart, currEnd]);
+            currStart = nextStart;
+            currEnd = nextEnd;
+        }
+    }
+
+    merged.push([currStart, currEnd]);
+    return merged;
+}
+
 export default {
     applyGraces,
     computeGraceMinutes,
@@ -211,7 +331,10 @@ export default {
     getOverlap,
     getOverlaps,
     getSegmentLength,
+    mergeSegments,
     minitsToHoursMins,
+    segmentsToMinits,
     snapLogToEnd,
-    snapLogToStart
+    snapLogToStart,
+    subtractSegments,
 };
